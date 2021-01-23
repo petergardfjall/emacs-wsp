@@ -370,6 +370,8 @@ If this happens to be the current workspace, it is first closed."
   "Delete PROJECT-NAME from current workspace."
   (interactive
    (list (completing-read "Select project: " (wsp-project-list)  nil t)))
+  (when (= (length (wsp-project-list)) 1)
+    (error "Cannot delete last project in workspace"))
 
   ;; close all project buffers
   (wsp-project-close project-name)
