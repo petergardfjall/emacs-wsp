@@ -342,7 +342,7 @@ If this happens to be the current workspace, it is first closed."
 (defun wsp-project-close (project-name)
   "Close all project buffers for PROJECT-NAME."
   (interactive
-   (list (completing-read "Select project: " (wsp-project-list) nil t)))
+   (list (completing-read "Select project to close: " (wsp-project-list) nil t)))
 
   (dolist (buffer (wsp--project-buffers project-name))
     (kill-buffer buffer)))
@@ -369,7 +369,7 @@ If this happens to be the current workspace, it is first closed."
 (defun wsp-project-delete (project-name)
   "Delete PROJECT-NAME from current workspace."
   (interactive
-   (list (completing-read "Select project: " (wsp-project-list)  nil t)))
+   (list (completing-read "Select project to delete: " (wsp-project-list)  nil t)))
   (when (= (length (wsp-project-list)) 1)
     (error "Cannot delete last project in workspace"))
 
