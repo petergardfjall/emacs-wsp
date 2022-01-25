@@ -1,6 +1,7 @@
 # About
 `wsp` is a collection of functions and interactive commands that coordinate the
-use of [projectile](https://github.com/bbatsov/projectile),
+use of
+[project.el](https://github.com/emacs-mirror/emacs/blob/master/lisp/progmodes/project.el),
 [treemacs](https://github.com/Alexander-Miller/treemacs/), and
 [desktop-save-mode](https://www.gnu.org/software/emacs/manual/html_node/elisp/Desktop-Save-Mode.html)
 to support a _workspace-centric workflow_ -- a workflow where it's easy to

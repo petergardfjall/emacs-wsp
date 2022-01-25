@@ -4,7 +4,7 @@
 ;;
 ;; Author: Peter Gardfjäll <peter.gardfjall.work@gmail.com>
 ;;
-;; Package-Requires: ((cl-lib "0.5") (treemacs "2.8") (projectile "2.2.0"))
+;; Package-Requires: ((cl-lib "0.5") (treemacs "2.8"))
 ;;
 ;;
 ;; This program is free software; you can redistribute it and/or modify
@@ -94,7 +94,7 @@
 
   (cl-assert (wsp-workspace-exists "workspace1")
 	     "expected workspace1 to exist")
-  (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace1" "projectile-bookmarks.eld"))
+  (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace1" "projects"))
 	     "workspace1: no projectile-bookmarks.eld at expected path")
   (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace1" "treemacs-persist"))
 	     "workspace1: no treemacs-persist at expected path")
@@ -113,9 +113,10 @@
   (cl-assert (equal (wsp-treemacs-open-project-names) '("proj1"))
 	     "expected treemacs to display proj1")
   ;; verify projectile-known-projects
+  (message "projects: %s" (project-known-project-roots))
   (let ((proj1-dir (abbreviate-file-name (wsp-test-project-dir "proj1"))))
-    (cl-assert (equal projectile-known-projects (list proj1-dir))
-	       "expected projectile to be aware of proj1"))
+    (cl-assert (equal (project-known-project-roots) (list proj1-dir))
+	       "expected project.el to be aware of proj1"))
 
 
   ;;
@@ -147,7 +148,7 @@
 	     "expected workspace1 to be current workspace")
 
   ;; assert workspace2 state file creation
-  (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace2" "projectile-bookmarks.eld"))
+  (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace2" "projects"))
 	     "workspace2: no projectile-bookmarks.eld at expected path")
   (cl-assert (file-exists-p (wsp-test-workspace-state-file "workspace2" "treemacs-persist"))
 	     "workspace2: no treemacs-persist at expected path")
@@ -157,7 +158,7 @@
   (cl-assert (equal (wsp-treemacs-open-project-names) '("proj2"))
 	     "expected treemacs to display proj2")
   (let ((proj2-dir (abbreviate-file-name (wsp-test-project-dir "proj2"))))
-    (cl-assert (equal projectile-known-projects (list proj2-dir))
+    (cl-assert (equal (project-known-project-roots) (list proj2-dir))
 	       "expected projectile to be aware of proj2"))
 
 
@@ -188,9 +189,8 @@
 
   (cl-assert (equal (treemacs-current-visibility) 'none)
 	     "expected treemacs to be invisible")
-  (cl-assert (equal projectile-known-projects nil)
+  (cl-assert (equal (project-known-project-roots) nil)
 	     "expected projectile to be empty")
-
 
   ;;
   ;; restore workspace1
@@ -215,7 +215,7 @@
   (cl-assert (equal (wsp-treemacs-open-project-names) '("proj1"))
 	     "expected treemacs to display proj1")
   (let ((proj1-dir (abbreviate-file-name (wsp-test-project-dir "proj1"))))
-    (cl-assert (equal projectile-known-projects (list proj1-dir))
+    (cl-assert (equal (project-known-project-roots) (list proj1-dir))
 	       "expected projectile to be aware of proj1"))
 
   ;;
@@ -256,7 +256,7 @@
   (cl-assert (equal (wsp-treemacs-open-project-names) '("proj2"))
 	     "expected treemacs to display proj2")
   (let ((proj2-dir (abbreviate-file-name (wsp-test-project-dir "proj2"))))
-    (cl-assert (equal projectile-known-projects (list proj2-dir))
+    (cl-assert (equal (project-known-project-roots) (list proj2-dir))
 	       "expected projectile to be aware of proj2"))
 
   (redisplay)
@@ -296,7 +296,7 @@ saved and can be restored."
 	     "expected treemacs to display proj1 and proj3")
   (let ((proj1-dir (abbreviate-file-name (wsp-test-project-dir "proj1")))
 	(proj3-dir (abbreviate-file-name (wsp-test-project-dir "proj3"))))
-    (cl-assert (equal projectile-known-projects (list proj3-dir proj1-dir ))
+    (cl-assert (equal (project-known-project-roots) (list proj3-dir proj1-dir ))
 	       "expected projectile to be aware of proj3 and proj1"))
   (redisplay)
   (wsp-test-end))
@@ -330,7 +330,7 @@ saved and can be restored."
 	     "expected treemacs to display proj1 and proj3")
   (let ((proj1-dir (abbreviate-file-name (wsp-test-project-dir "proj1")))
 	(proj3-dir (abbreviate-file-name (wsp-test-project-dir "proj3"))))
-    (cl-assert (equal projectile-known-projects (list proj3-dir proj1-dir ))
+    (cl-assert (equal (project-known-project-roots) (list proj3-dir proj1-dir ))
 	       "expected projectile to be aware of proj3 and proj1"))
   ;;
   ;; close workspace: should close all open workspace buffers
@@ -346,8 +346,8 @@ saved and can be restored."
 	     "expected treemacs to be invisible")
   (cl-assert (equal (wsp-treemacs-open-project-names) nil)
 	     "expected treemacs to display no projects")
-  (cl-assert (equal projectile-mode nil)
-	     "expected projectile to be deactivated")
+  (cl-assert (equal project--list 'unset)
+	     "expected project.el project--list to be deactivated")
   (redisplay)
   (wsp-test-end))
 
@@ -373,7 +373,7 @@ and close all buffers in the current workspace."
 	     "expected treemacs to display proj1 and proj3")
   (let ((proj1-dir (abbreviate-file-name (wsp-test-project-dir "proj1")))
 	(proj3-dir (abbreviate-file-name (wsp-test-project-dir "proj3"))))
-    (cl-assert (equal projectile-known-projects (list proj3-dir proj1-dir ))
+    (cl-assert (equal (project-known-project-roots) (list proj3-dir proj1-dir ))
 	       "expected projectile to be aware of proj3 and proj1"))
 
   ;; switch (open another), should close all workspace1 buffers
@@ -394,7 +394,7 @@ and close all buffers in the current workspace."
   (cl-assert (equal (wsp-treemacs-open-project-names) '("proj2"))
 	     "expected treemacs to display proj2")
   (let ((proj2-dir (abbreviate-file-name (wsp-test-project-dir "proj2"))))
-    (cl-assert (equal projectile-known-projects (list proj2-dir))
+    (cl-assert (equal (project-known-project-roots) (list proj2-dir))
 	       "expected projectile to be aware of proj2"))
   (redisplay)
   (wsp-test-end))

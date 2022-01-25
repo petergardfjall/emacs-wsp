@@ -5,8 +5,8 @@
 ;; Author: Peter Gardfjäll <peter.gardfjall.work@gmail.com>
 ;; URL: https://github.com/petergardfjall/emacs-wsp
 ;; Keywords: workspace, project
-;; Package-Requires: ((emacs "25.2") (cl-lib "0.5") (treemacs "2.8") (projectile "2.2.0"))
-;; Version: 0.0.1
+;; Package-Requires: ((emacs "26.1") (cl-lib "0.5") (treemacs "2.8"))
+;; Version: 0.1.0
 ;; Homepage: https://github.com/petergardfjall/emacs-wsp
 ;;
 ;;
@@ -27,7 +27,7 @@
 ;;; Commentary:
 ;;
 ;; A collection of functions and interactive commands that coordinate the use of
-;; `treemacs`, `projectile` and `desktop-save-mode` to support a
+;; `treemacs`, `project.el` and `desktop-save-mode` to support a
 ;; workspace-centric workflow.
 ;;
 ;; The user can manage and switch between a collection of workspaces, each of
@@ -36,7 +36,7 @@
 
 ;;; Code:
 
-(require 'projectile)
+(require 'project)
 (require 'cl-lib)
 (require 'desktop)
 (require 'treemacs)
@@ -93,8 +93,8 @@ the user will be prompted."
 	 (dir-name (wsp--basename proj-path))
 	 (p1 (treemacs-project->create! :name dir-name :path proj-path :path-status 'local-readable))
 	 (ws (treemacs-workspace->create! :name name :projects (list p1))))
-    ;; add first project to projectile (will also save state)
-    (projectile-add-known-project proj-path)
+    ;; add first project to project.el (will also save state)
+    (project-remember-project (wsp--project proj-path))
     ;; create treemacs state file
     (setq treemacs--workspaces (list ws))
     (setf (treemacs-current-workspace) ws)
@@ -102,10 +102,11 @@ the user will be prompted."
     (treemacs--persist)))
 
 
+
 (defun wsp--workspace-init (name)
   "Reset and prime libraries for being used with workspace named NAME."
   (wsp--desktop-init name)
-  (wsp--projectile-init name)
+  (wsp--project-init name)
   (wsp--treemacs-init name))
 
 
@@ -133,8 +134,9 @@ the user will be prompted."
     (setf treemacs--workspaces (list empty-ws))
     (setf (treemacs-current-workspace) empty-ws))
 
-  ;; disable projectile
-  (projectile-mode 0)
+  ;; set no current project
+  (setq project--list 'unset)
+  (setq project-list-file 'unset)
 
   ;; set no current workspace
   (setq wsp--current-workspace nil))
@@ -186,7 +188,7 @@ If this happens to be the current workspace, it is first closed."
   ;; set up all libraries for use with workspace NAME
   (wsp--workspace-init name)
 
-  (wsp--projectile-activate name)
+  (wsp--project-activate name)
   (wsp--desktop-activate name)
   (wsp--treemacs-activate name)
 
@@ -231,13 +233,11 @@ If this happens to be the current workspace, it is first closed."
   (put 'treemacs :state-is-restored nil))
 
 
-(defun wsp--projectile-init (name)
-  "Disable and prepare `projectile` for use in workspace NAME."
-  (projectile-mode 0)
-  ;; projectile shouldn't automatically register known projects
-  (setq projectile-track-known-projects-automatically nil)
-  (setq projectile-known-projects-file
-	(wsp--projectile-projects-file name)))
+(defun wsp--project-init (name)
+  "Prepare `project.el` for use in workspace NAME."
+  ;; make sure project list gets reloaded from new location.
+  (setq project--list 'unset)
+  (setq project-list-file (wsp--projects-file name)))
 
 
 (defun wsp--desktop-load-hook ()
@@ -262,9 +262,10 @@ If this happens to be the current workspace, it is first closed."
     (desktop-read)))
 
 
-(defun wsp--projectile-activate (name)
-  "Activate/load `projectile` in workspace NAME."
-  (projectile-mode +1))
+(defun wsp--project-activate (name)
+  "Activate/load `project.el` in workspace NAME."
+  ;; initialize `project--list' using contents of `project-list-file'.
+  (project--read-project-list))
 
 
 (defun wsp--treemacs-activate (name)
@@ -283,9 +284,9 @@ If this happens to be the current workspace, it is first closed."
   "State file destination for `desktop-save-mode` in workspace NAME."
   (concat (wsp--workspace-dir name) wsp-desktop-filename))
 
-(defun wsp--projectile-projects-file (name)
-  "State file destination for `projectile` in workspace NAME."
-  (concat (wsp--workspace-dir name) "projectile-bookmarks.eld"))
+(defun wsp--projects-file (name)
+  "State file destination for `project.el` in workspace NAME."
+  (concat (wsp--workspace-dir name) "projects"))
 
 (defun wsp--treemacs-statefile (name)
   "State file destination for `treemacs` in workspace NAME."
@@ -307,12 +308,18 @@ If this happens to be the current workspace, it is first closed."
 
   (if (not (wsp-workspace-current))
       nil ;; no workspace set => empty list
-    (if (bound-and-true-p projectile-mode)
-	;; note: may not be unique if we only care about the dirname
-	(let ((projects (mapcar 'file-name-nondirectory
-				(mapcar 'directory-file-name projectile-known-projects))))
-	  (sort projects 'string-lessp))
-      (error "Cannot list projects when not in projectile-mode"))))
+    (let* ((project-roots (mapcar #'car project--list))
+	   ;; get rid of trailing slashes
+	   (project-dirs (mapcar 'directory-file-name project-roots))
+	   (project-names (mapcar 'file-name-nondirectory project-dirs)))
+      (sort project-names 'string-lessp))))
+
+
+(defun wsp-project-exists (name)
+  "Determine if the current workspace contains a project named NAME."
+    (if (not (wsp-workspace-current))
+	nil ;; no workspace set => empty list
+      (member name (wsp-project-list))))
 
 
 (defun wsp-project-current ()
@@ -320,25 +327,31 @@ If this happens to be the current workspace, it is first closed."
   (interactive)
   (wsp--ensure-workspace-open)
 
+  ;; TODO
   (let ((proj-path (cl-find-if (lambda (proj)
 				 (string-prefix-p proj (buffer-file-name (window-buffer))))
-			       (wsp--projectile-known-projects-expanded))))
+			       (wsp--project-list-abspath))))
     (if proj-path
 	(message "%s" (wsp--basename proj-path))
       nil)))
+
 
 (defun wsp-project-add (dir-path)
   "Add a project with directory tree rooted at DIR-PATH."
   (interactive (list (and (wsp--ensure-workspace-open) (read-directory-name "Project directory to add:"))))
 
-  (let (project-name (wsp--basename dir-path))
-    (projectile-add-known-project dir-path)
-    (treemacs-add-project-to-workspace dir-path project-name)
-    ;;(put 'treemacs :state-is-restored t)
-    (treemacs--persist))
-  (message "project added: %s" dir-path))
+  (let ((project-name (wsp--basename dir-path)))
+    (when (wsp-project-exists project-name)
+      (error "Project already exists in workspace"))
+
+    (let (project-name (wsp--basename dir-path))
+      (project-remember-project (wsp--project dir-path))
+      (treemacs-add-project-to-workspace dir-path project-name)
+      (treemacs--persist))
+    (message "project added: %s" dir-path)))
 
 
+;; TODO rename: wsp-project-close-buffers?
 (defun wsp-project-close (project-name)
   "Close all project buffers for PROJECT-NAME."
   (interactive
@@ -375,9 +388,9 @@ If this happens to be the current workspace, it is first closed."
 
   ;; close all project buffers
   (wsp-project-close project-name)
-  (let* ((project-path (wsp--projectile-project project-name))
+  (let* ((project-path (wsp--project-path project-name))
 	 (abs-path (expand-file-name project-path)))
-    (projectile-remove-known-project project-path)
+    (project-forget-project project-path)
     (treemacs--remove-project-from-current-workspace (treemacs--find-project-for-path abs-path))
     (treemacs--persist)
     (treemacs--rerender-after-workspace-change)
@@ -391,13 +404,13 @@ has been opened or otherwise prompts to select a file from the
 project."
   (interactive
    (list (completing-read "Switch to project: " (wsp-project-list)  nil t)))
-  (let ((proj (wsp--projectile-project project-name))
+  (let ((proj-dir (wsp--project-path project-name))
 	(proj-buffers (wsp--project-buffers project-name)))
     (if proj-buffers
 	;; if a project buffer is already opened, switch to that
 	(switch-to-buffer (car proj-buffers))
-      ;; otherwise: select a buffer to open via projectile
-      (projectile-switch-project-by-name proj))))
+      ;; otherwise: select a buffer in the other project to open via project.el
+      (project-switch-project proj-dir))))
 
 (defun wsp--basename (path)
   "Return the base name of a PATH.
@@ -418,30 +431,43 @@ For a PATH of either `/a/b/c/` or `/a/b/c`, the result is `c`."
   (file-attribute-type (file-attributes path)))
 
 
-(defun wsp--projectile-project (project-name)
-  "Return the projectile name/path corresponding to the wsp PROJECT-NAME."
+(defun wsp--project-path (project-name)
+  "Return the project path corresponding to the wsp PROJECT-NAME.
+Note that the path may not be exanded (for example, it could be
+`~/.emacs.d`)."
   (cl-find-if (lambda (proj) (string= (wsp--basename proj) project-name))
-	      projectile-known-projects))
+	      (project-known-project-roots)))
 
-(defun wsp--projectile-known-projects-expanded ()
-  "List all Projectile known project roots with absolute paths."
-  (mapcar #'expand-file-name  projectile-known-projects))
+(defun wsp--project-list-abspath ()
+  "List all project.el known project roots with absolute paths."
+  (let* ((project-roots (mapcar #'car project--list))
+	 (abs-paths (mapcar #'expand-file-name project-roots)))
+    abs-paths))
 
 
 (defun wsp--project-buffers (project-name)
-  "List all open buffers that belong to project PROJECT-NAME."
+  "List all open file buffers that belong to project PROJECT-NAME."
   ;; get all project buffers except special buffers
-  (cl-remove-if
-   (lambda (buffer) (member (buffer-name buffer) '("*scratch*" "*Messages*" "*Backtrace*" )))
-   ;; note: projectile-project-buffers seems to require full path (not
-   ;; `~/some/proj` as returned by `projectile-known-projects`).
-   (let ((project-path (expand-file-name (wsp--projectile-project project-name))))
-     (projectile-project-buffers project-path))))
+  (cl-remove-if-not
+   (lambda (buffer) (wsp--file-visiting-buffer buffer))
+   (let ((project-path (expand-file-name (wsp--project-path project-name))))
+     (project-buffers (wsp--project project-path)))))
 
 
 (defun wsp--ensure-workspaces-dir ()
   "Ensures that the workspaces directory has been created."
   (make-directory wsp-workspaces-dir t))
+
+
+(defun wsp--project (project-path)
+  "Turn a PROJECT-PATH into a project.el API-compatible project."
+  (cons 'vc project-path))
+
+(defun wsp--file-visiting-buffer (buffer)
+  "Indicate if the given BUFFER is visiting a file.
+This can be used to distinguish regular file buffers from special
+ones like for example '*scratch*'."
+  (buffer-file-name buffer))
 
 
 (provide 'wsp)
