@@ -315,6 +315,10 @@ If this happens to be the current workspace, it is first closed."
       (sort project-names 'string-lessp))))
 
 
+(defun wsp-project-list-open ()
+  "Return the name of each project in the current workspace with open buffers."
+  (cl-remove-if-not #'wsp--project-is-open (wsp-project-list)))
+
 (defun wsp-project-exists (name)
   "Determine if the current workspace contains a project named NAME."
     (if (not (wsp-workspace-current))
@@ -355,7 +359,7 @@ If this happens to be the current workspace, it is first closed."
 (defun wsp-project-close (project-name)
   "Close all project buffers for PROJECT-NAME."
   (interactive
-   (list (completing-read "Select project to close: " (wsp-project-list) nil t)))
+   (list (completing-read "Select project to close: " (wsp-project-list-open) nil t)))
 
   (dolist (buffer (wsp--project-buffers project-name))
     (kill-buffer buffer)))
@@ -444,6 +448,10 @@ Note that the path may not be exanded (for example, it could be
 	 (abs-paths (mapcar #'expand-file-name project-roots)))
     abs-paths))
 
+
+(defun wsp--project-is-open (project-name)
+  "Indicates if the given project PROJECT-NAME is open (has open buffers)."
+  (wsp--project-buffers project-name))
 
 (defun wsp--project-buffers (project-name)
   "List all open file buffers that belong to project PROJECT-NAME."
