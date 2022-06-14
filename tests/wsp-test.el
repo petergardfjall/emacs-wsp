@@ -125,7 +125,17 @@
   ;; - adding another project to workspace
   ;; - creating workspace2
   ;;
+
+  (cl-assert (equal (wsp-project-list) '("proj1"))
+	     "expected proj1 to be in list of projects")
+  ;; currently no projects with open buffers
+  (cl-assert (equal (wsp-project-list-open) nil)
+	     "expected list of open projects to be empty")
   (find-file (wsp-test-project-file "proj1" "1a.txt"))
+  ;; now proj1 has an open buffer and should be listed as an open project.
+  (cl-assert (equal (wsp-project-list-open) '("proj1"))
+	     "expected proj1 to be in list of open projects")
+
   (cl-assert (string= (wsp-project-current) "proj1")
 	     "expected proj1 to be current project")
   (cl-assert (wsp-test-buffers-open-p '("1a.txt"))
@@ -160,7 +170,6 @@
   (let ((proj2-dir (abbreviate-file-name (wsp-test-project-dir "proj2"))))
     (cl-assert (equal (project-known-project-roots) (list proj2-dir))
 	       "expected projectile to be aware of proj2"))
-
 
   ;; open workspace2 file 2b.txt
 
@@ -230,10 +239,18 @@
   (wsp-project-add (wsp-test-project-dir "proj3"))
   (cl-assert (equal (wsp-project-list) '("proj1" "proj3"))
 	     "expected workspace1 to contain proj1 and proj3")
+  ;; only proj1 has open buffers
+  (cl-assert (equal (wsp-project-list-open) '("proj1"))
+	     "expected only proj1 to be listed among 'open projects'")
+
   ;; open project file
   (find-file (wsp-test-project-file "proj3" "3a.txt"))
   (cl-assert (wsp-test-buffers-open-p '("1a.txt" "1b.txt" "3a.txt"))
 	     "expected buffers proj1/{1a.txt,1b.txt}, proj3/3a.txt to be open")
+  ;; after opening a project file, proj3 should also be counted as "open"
+  (cl-assert (equal (wsp-project-list-open) '("proj1" "proj3"))
+	     "expected both proj1 and proj3 to be listed among 'open projects'")
+
 
   ;;
   ;; restore workspace2
