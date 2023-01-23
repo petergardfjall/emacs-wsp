@@ -5,7 +5,7 @@
 ;; Author: Peter Gardfjäll <peter.gardfjall.work@gmail.com>
 ;; URL: https://github.com/petergardfjall/emacs-wsp
 ;; Keywords: workspace, project
-;; Package-Requires: ((emacs "26.1") (cl-lib "0.5") (treemacs "2.8"))
+;; Package-Requires: ((emacs "26.1") (cl-lib "0.5"))
 ;; Version: 0.1.0
 ;; Homepage: https://github.com/petergardfjall/emacs-wsp
 ;;
@@ -27,8 +27,7 @@
 ;;; Commentary:
 ;;
 ;; A collection of functions and interactive commands that coordinate the use of
-;; `treemacs`, `project.el` and `desktop-save-mode` to support a
-;; workspace-centric workflow.
+;; `project.el` and `desktop-save-mode` to support a workspace-centric workflow.
 ;;
 ;; The user can manage and switch between a collection of workspaces, each of
 ;; which tracks a set of projects (directory roots).  The user can manage and
@@ -39,16 +38,12 @@
 (require 'project)
 (require 'cl-lib)
 (require 'desktop)
-(require 'treemacs)
 
 (defvar wsp-workspaces-dir (concat (file-name-as-directory user-emacs-directory) "wsp")
-  "Minimum frame width when treemacs is enabled (in characters).")
+  "Directory where workspace state is saved.")
 
 (defvar wsp-desktop-filename  "desktop"
   "The file name to use for `desktop-save-mode` state.")
-
-(defvar wsp--default-treemacs-file (expand-file-name ".cache/treemacs-persist" user-emacs-directory)
-  "The default value for treemacs state file.")
 
 (defvar wsp--current-workspace nil
   "Tracks the name of the workspace currently open.")
@@ -72,7 +67,10 @@ prompted."
 
   (unless (wsp-workspace-exists name)
     (wsp--workspace-create name first-project-dir))
-  (wsp--workspace-load name))
+  (wsp--workspace-load name)
+
+  (require 'project)
+  (add-hook 'project-find-functions #'wsp--try-project-list))
 
 
 (defun wsp--workspace-create (name &optional first-project-dir)
@@ -89,25 +87,16 @@ the user will be prompted."
 
   ;; read initial project directory
   (let* ((proj-path (or first-project-dir
-			 (read-directory-name "Add first workspace project directory:")))
-	 (dir-name (wsp--basename proj-path))
-	 (p1 (treemacs-project->create! :name dir-name :path proj-path :path-status 'local-readable))
-	 (ws (treemacs-workspace->create! :name name :projects (list p1))))
+			 (wsp--read-dir-name "Add first workspace project directory:"))))
     ;; add first project to project.el (will also save state)
-    (project-remember-project (wsp--project proj-path))
-    ;; create treemacs state file
-    (setq treemacs--workspaces (list ws))
-    (setf (treemacs-current-workspace) ws)
-    (put 'treemacs :state-is-restored t)
-    (treemacs--persist)))
+    (project-remember-project (wsp--project proj-path))))
 
 
 
 (defun wsp--workspace-init (name)
   "Reset and prime libraries for being used with workspace named NAME."
   (wsp--desktop-init name)
-  (wsp--project-init name)
-  (wsp--treemacs-init name))
+  (wsp--project-init name))
 
 
 (defun wsp-workspace-close ()
@@ -124,22 +113,14 @@ the user will be prompted."
   (dolist (project-name (wsp-project-list))
     (wsp-project-close project-name))
 
-  ;; save treemacs state
-  (treemacs--persist)
-  ;; disable/close treemacs
-  (wsp--treemacs-close)
-  ;; reset the treemacs workspace state
-  (setq treemacs-persist-file wsp--default-treemacs-file)
-  (let* ((empty-ws (treemacs-workspace->create! :name "Default")))
-    (setf treemacs--workspaces (list empty-ws))
-    (setf (treemacs-current-workspace) empty-ws))
-
   ;; set no current project
   (setq project--list 'unset)
   (setq project-list-file 'unset)
 
   ;; set no current workspace
-  (setq wsp--current-workspace nil))
+  (setq wsp--current-workspace nil)
+
+  (remove-hook 'project-find-functions #'wsp--try-project-list))
 
 
 (defun wsp-workspace-current ()
@@ -159,6 +140,7 @@ If this happens to be the current workspace, it is first closed."
     (wsp-workspace-close))
   ;; ... then perform delete
   (when (wsp-workspace-exists name)
+    (wsp--pulse)
     (message "deleting workspace %s ..." name)
     (delete-directory (wsp--workspace-dir name) t)))
 
@@ -190,7 +172,6 @@ If this happens to be the current workspace, it is first closed."
 
   (wsp--project-activate name)
   (wsp--desktop-activate name)
-  (wsp--treemacs-activate name)
 
   (setq wsp--current-workspace name)
   (message "workspace '%s' loaded." name))
@@ -214,25 +195,6 @@ If this happens to be the current workspace, it is first closed."
   (setq desktop-save t))
 
 
-(defun wsp--treemacs-close ()
-  "Close any existing open treemacs window."
-  (when (treemacs-get-local-window)
-    (delete-window (treemacs-get-local-window)))
-  (when (treemacs-get-local-buffer)
-    (kill-buffer (treemacs-get-local-buffer)))
-  (treemacs--invalidate-buffer-project-cache))
-
-
-(defun wsp--treemacs-init (name)
-  "Close any existing treemacs session and prepare `treemacs` for use in workspace NAME."
-  (wsp--treemacs-close)
-
-  ;; set state file
-  (setq treemacs-persist-file (wsp--treemacs-statefile name))
-  ;; mark that treemacs state has not yet been loaded
-  (put 'treemacs :state-is-restored nil))
-
-
 (defun wsp--project-init (name)
   "Prepare `project.el` for use in workspace NAME."
   ;; make sure project list gets reloaded from new location.
@@ -243,6 +205,7 @@ If this happens to be the current workspace, it is first closed."
 (defun wsp--desktop-load-hook ()
   "To be called when a desktop is successsfully loaded."
   (message "desktop loaded: %s" desktop-path))
+
 
 (defun wsp--desktop-activate (name)
   "Activate/load `desktop-save-mode` in workspace NAME."
@@ -263,21 +226,9 @@ If this happens to be the current workspace, it is first closed."
 
 
 (defun wsp--project-activate (name)
-  "Activate/load `project.el` in workspace NAME."
-  ;; initialize `project--list' using contents of `project-list-file'.
+  "Activate/load `project.el` in workspace NAME.
+This loads values into `project--list' from `project-list-file'."
   (project--read-project-list))
-
-
-(defun wsp--treemacs-activate (name)
-  "Activate/load `treemacs` in workspace NAME."
-
-  ;; move point back to current buffer after displaying treemacs
-  (save-selected-window
-    ;; restore treemacs state from saved workspace file
-    (setf (treemacs-current-workspace) (car (treemacs--restore)))
-    ;; tells treemacs that state has already been restored
-    (put 'treemacs :state-is-restored t)
-    (treemacs)))
 
 
 (defun wsp--desktop-save-path (name)
@@ -287,10 +238,6 @@ If this happens to be the current workspace, it is first closed."
 (defun wsp--projects-file (name)
   "State file destination for `project.el` in workspace NAME."
   (concat (wsp--workspace-dir name) "projects"))
-
-(defun wsp--treemacs-statefile (name)
-  "State file destination for `treemacs` in workspace NAME."
-  (concat (wsp--workspace-dir name) "treemacs-persist"))
 
 (defun wsp--workspace-dir (name)
   "Workspace state directory for workspace NAME."
@@ -340,26 +287,28 @@ If this happens to be the current workspace, it is first closed."
       nil)))
 
 
+
 (defun wsp-project-add (dir-path)
   "Add a project with directory tree rooted at DIR-PATH."
-  (interactive (list (and (wsp--ensure-workspace-open) (read-directory-name "Project directory to add:"))))
+  (interactive (list (and (wsp--ensure-workspace-open) (wsp--read-dir-name "Project directory to add:"))))
 
   (let ((project-name (wsp--basename dir-path)))
     (when (wsp-project-exists project-name)
       (error "Project already exists in workspace"))
-
-    (let (project-name (wsp--basename dir-path))
-      (project-remember-project (wsp--project dir-path))
-      (treemacs-add-project-to-workspace dir-path project-name)
-      (treemacs--persist))
+    (project-remember-project (wsp--project dir-path))
+    (wsp--pulse)
     (message "project added: %s" dir-path)))
+
 
 
 ;; TODO rename: wsp-project-close-buffers?
 (defun wsp-project-close (project-name)
   "Close all project buffers for PROJECT-NAME."
   (interactive
-   (list (completing-read "Select project to close: " (wsp-project-list-open) nil t)))
+   (progn
+     (unless (wsp-project-list-open)
+       (error "Nothing to close (no projects with open buffers)"))
+     (list (completing-read "Select project to close: " (wsp-project-list-open) nil t))))
 
   (dolist (buffer (wsp--project-buffers project-name))
     (kill-buffer buffer)))
@@ -395,9 +344,7 @@ If this happens to be the current workspace, it is first closed."
   (let* ((project-path (wsp--project-path project-name))
 	 (abs-path (expand-file-name project-path)))
     (project-forget-project project-path)
-    (treemacs--remove-project-from-current-workspace (treemacs--find-project-for-path abs-path))
-    (treemacs--persist)
-    (treemacs--rerender-after-workspace-change)
+    (wsp--pulse)
     (message "project removed: %s (%s)" project-name project-path)))
 
 
@@ -411,9 +358,9 @@ project."
   (let ((proj-dir (wsp--project-path project-name))
 	(proj-buffers (wsp--project-buffers project-name)))
     (if proj-buffers
-	;; if a project buffer is already opened, switch to that
+	;; If a project buffer is already opened, switch to that.
 	(switch-to-buffer (car proj-buffers))
-      ;; otherwise: select a buffer in the other project to open via project.el
+      ;; Otherwise: select a buffer in the other project to open via project.el
       (project-switch-project proj-dir))))
 
 (defun wsp--basename (path)
@@ -437,7 +384,7 @@ For a PATH of either `/a/b/c/` or `/a/b/c`, the result is `c`."
 
 (defun wsp--project-path (project-name)
   "Return the project path corresponding to the wsp PROJECT-NAME.
-Note that the path may not be exanded (for example, it could be
+Note that the path may not be expanded (for example, it could be
 `~/.emacs.d`)."
   (cl-find-if (lambda (proj) (string= (wsp--basename proj) project-name))
 	      (project-known-project-roots)))
@@ -458,7 +405,7 @@ Note that the path may not be exanded (for example, it could be
   ;; get all project buffers except special buffers
   (cl-remove-if-not
    (lambda (buffer) (wsp--file-visiting-buffer buffer))
-   (let ((project-path (expand-file-name (wsp--project-path project-name))))
+   (let ((project-path (wsp--project-path project-name)))
      (project-buffers (wsp--project project-path)))))
 
 
@@ -469,13 +416,56 @@ Note that the path may not be exanded (for example, it could be
 
 (defun wsp--project (project-path)
   "Turn a PROJECT-PATH into a project.el API-compatible project."
-  (cons 'vc project-path))
+  (unless (file-directory-p project-path)
+    (error "Cannot turn '%s' into a project: not a directory" project-path))
+  (cons 'transient project-path))
+  ;; (project-current nil (wsp--closest-dir project-path)))
+
+(defun wsp--closest-dir (path)
+  "Return the closest parent directory for PATH.
+If PATH is a directory, PATH is returned. Otherwise its parent is returned."
+  (let ((path (wsp--normalized-path path)))
+    (if (file-directory-p path)
+        path
+      (file-name-directory path))))
+
+(defun wsp--normalized-path (path)
+  "Return a normalized PATH that is expanded and trimmed of trailing slash."
+  (string-trim-right (expand-file-name path) "/"))
+
 
 (defun wsp--file-visiting-buffer (buffer)
   "Indicate if the given BUFFER is visiting a file.
 This can be used to distinguish regular file buffers from special
 ones like for example '*scratch*'."
   (buffer-file-name buffer))
+
+(defun wsp--read-dir-name (prompt)
+  "Reads a directory name in the mini-buffer using the given PROMPT."
+  ;; Cleans the path and then abbreviates it (for example substituing ~ for the
+  ;; home directory.
+  (abbreviate-file-name (expand-file-name (read-directory-name (format prompt)))))
+
+(defun wsp--pulse ()
+  "Produces a flashing pulse at point.
+Used to as a visual cue that a command modified the workspace."
+  (pulse-momentary-highlight-one-line (point) 'cursor))
+
+
+(defun wsp--try-project-list (dir)
+  "Find a project containing DIR from the `project-list-file'.
+
+It finds the longest prefix match to correctly capture nested projects."
+  (let ((longest-match nil))
+    (dolist (it (project-known-project-roots))
+      (let ((it (abbreviate-file-name it))
+            (dir (abbreviate-file-name dir)))
+        (when (and (string-prefix-p it dir)
+                   (file-directory-p it)
+                   (> (length it) (length longest-match)))
+          (setq longest-match it))))
+    (when longest-match
+      (cons 'transient longest-match))))
 
 
 (provide 'wsp)
